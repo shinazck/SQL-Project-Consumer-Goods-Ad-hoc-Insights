@@ -1,0 +1,162 @@
+#CODEBASICS_SQL_resume_Project_Challenge
+
+#TASK 1
+SELECT
+    DISTINCT market FROM  dim_customer
+WHERE region = 'APAC' AND customer = "Atliq Exclusive";
+
+
+#TASK 2
+WITH product_2020 AS (
+SELECT 
+     COUNT(DISTINCT product_code ) AS unique_products_2020
+FROM fact_sales_monthly
+WHERE fiscal_year=2020
+),
+product_2021 AS  (
+SELECT 
+     COUNT(DISTINCT product_code ) AS unique_products_2021
+FROM fact_sales_monthly
+WHERE fiscal_year=2021
+)
+SELECT 
+     p20.unique_products_2020,
+     p21.unique_products_2021,
+     round((p21.unique_products_2021-p20.unique_products_2020)*100/p20.unique_products_2020,2) AS percentage_change
+     
+FROM product_2020  p20
+CROSS JOIN  product_2021 p21
+
+
+#TASK 3
+SELECT 
+      segment, count(DISTINCT product_code) AS product_count
+FROM dim_product
+GROUP BY segment
+ORDER BY product_count DESC
+
+
+#TASK 4
+WITH temp_table  AS (
+SELECT 
+     P.segment,S.fiscal_year,COUNT(distinct s.product_code) as product_count
+FROM fact_sales_monthly S
+JOIN dim_product P ON S.product_code=P.product_code
+GROUP BY P.segment,S.fiscal_year
+)
+SELECT
+      up_2020.segment,
+      up_2020.product_count AS product_count_2020,
+      up_2021.product_count AS product_count_2021,
+      up_2021.product_count-up_2020.product_count AS difference
+FROM temp_table AS up_2020
+JOIN temp_table AS up_2021
+ON up_2020.segment=up_2021.segment AND up_2020.fiscal_year=2020  AND up_2021.fiscal_year=2021
+ORDER BY 
+     difference DESC
+
+
+#TASK 5
+SELECT 	
+     M.product_code,
+     CONCAT( product," (",variant,") ") AS product,
+     cost_year,
+     manufacturing_cost
+FROM fact_manufacturing_cost M
+JOIN dim_product P ON M.product_code=P.product_code
+WHERE manufacturing_cost=(SELECT MIN( manufacturing_cost) FROM fact_manufacturing_cost)
+OR manufacturing_cost=(SELECT MAX( manufacturing_cost) FROM fact_manufacturing_cost) 
+ORDER BY manufacturing_cost DESC
+
+
+#TASK 6
+SELECT 
+    c.customer_code, 
+    c.customer, 
+    ROUND(AVG(pre_invoice_discount_pct), 4) AS average_discount_percentage
+FROM fact_pre_invoice_deductions d
+JOIN dim_customer c 
+    ON d.customer_code = c.customer_code
+WHERE c.market = 'India' 
+  AND fiscal_year = '2021'
+GROUP BY c.customer_code, c.customer
+ORDER BY average_discount_percentage DESC
+LIMIT 5;
+
+#TASK 7
+WITH temp_table AS (
+    SELECT 
+        C.customer,
+        MONTHNAME(S.date) AS months,
+        MONTH(S.date) AS month_number,
+        YEAR(S.date) AS year,
+        (S.sold_quantity * G.gross_price) AS gross_sales
+    FROM fact_sales_monthly S
+    JOIN fact_gross_price G 
+        ON S.product_code = G.product_code
+    JOIN dim_customer C     
+        ON C.customer_code = S.customer_code
+    WHERE C.customer = 'Atliq Exclusive'
+)
+SELECT
+    year,
+    months,
+    CONCAT(ROUND(SUM(gross_sales) / 1000000, 2), 'M') AS gross_sales
+FROM temp_table
+GROUP BY year, months, month_number
+ORDER BY year, month_number;
+
+
+#TASK 8
+WITH temp_table AS (
+  SELECT date,month(date_add(date,interval 4 month)) AS period, fiscal_year,sold_quantity 
+FROM fact_sales_monthly
+)
+SELECT CASE
+        WHEN period BETWEEN 1 AND 3 THEN 'Q1'
+        WHEN period BETWEEN 4 AND 6 THEN 'Q2'
+        WHEN period BETWEEN 7 AND 9 THEN 'Q3'
+		WHEN period BETWEEN 10 AND 12 THEN 'Q4'
+    END AS quarter,
+ round(sum(sold_quantity)/1000000,2) as total_sold_quanity_in_millions FROM temp_table
+WHERE fiscal_year = 2020
+GROUP BY quarter
+ORDER BY total_sold_quanity_in_millions DESC ;
+
+
+#TASK 9
+WITH temp_table AS (
+SELECT 
+      C.channel,
+    sum(gross_price*sold_quantity) AS total_sales
+FROM dim_customer C
+JOIN fact_sales_monthly S ON C.customer_code=S.customer_code
+JOIN fact_gross_price G ON G.product_code=S.product_code
+WHERE S.fiscal_year=2021
+GROUP BY C.channel
+ORDER BY total_sales DESC
+)
+SELECT 
+     channel,
+     round(total_sales/1000000,2) AS gross_sales_mln,
+     round(total_sales/(sum(total_sales) over())*100,2) AS 	percentage
+FROM temp_table
+
+
+#TASK 10
+WITH temp_table AS (
+    SELECT 
+        division, 
+        s.product_code, 
+        CONCAT(p.product,"(",p.variant,")") AS product, 
+        SUM(sold_quantity) AS total_sold_quantity,
+        RANK() OVER (PARTITION BY division ORDER BY SUM(sold_quantity) DESC) AS rank_order
+    FROM fact_sales_monthly s
+    JOIN dim_product p
+        ON s.product_code = p.product_code
+    WHERE fiscal_year = 2021
+    GROUP BY division, s.product_code, p.product, p.variant
+)
+SELECT * 
+FROM temp_table
+WHERE rank_order IN (1,2,3);
